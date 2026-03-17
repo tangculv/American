@@ -16,6 +16,24 @@ DEFAULT_SCHEDULE_CRON = "0 9 * * 0"
 DEFAULT_SCHEDULE_TIMEZONE = "Asia/Shanghai"
 DEFAULT_STRATEGY_NAME = "low_valuation_quality"
 
+# On read-only filesystems (e.g. Streamlit Cloud), use /tmp for mutable data.
+# Override with DATA_DIR env var; fall back to /tmp if ROOT is not writable.
+def _default_data_dir() -> Path:
+    override = os.environ.get("DATA_DIR", "").strip()
+    if override:
+        return Path(override)
+    candidate = ROOT / "data"
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+        (candidate / ".write_test").touch()
+        (candidate / ".write_test").unlink()
+        return candidate
+    except OSError:
+        return Path("/tmp/us_stock_data")
+
+
+_DATA_DIR = _default_data_dir()
+
 
 @dataclass(frozen=True)
 class ProjectPaths:
@@ -23,11 +41,11 @@ class ProjectPaths:
     config_dir: Path = ROOT / "config"
     strategy_dir: Path = ROOT / "config" / "strategies"
     app_config_path: Path = ROOT / "config" / "app.yaml"
-    outputs_dir: Path = ROOT / "outputs" / "fmp-screening"
-    watchlist_dir: Path = ROOT / "watchlist"
-    data_dir: Path = ROOT / "data"
-    database_path: Path = ROOT / "data" / "stock_research.db"
-    logs_dir: Path = ROOT / "logs"
+    outputs_dir: Path = _DATA_DIR / "outputs" / "fmp-screening"
+    watchlist_dir: Path = _DATA_DIR / "watchlist"
+    data_dir: Path = _DATA_DIR
+    database_path: Path = _DATA_DIR / "stock_research.db"
+    logs_dir: Path = _DATA_DIR / "logs"
 
     def ensure(self) -> None:
         for path in (
@@ -40,7 +58,10 @@ class ProjectPaths:
             self.database_path.parent,
             self.logs_dir,
         ):
-            path.mkdir(parents=True, exist_ok=True)
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass  # read-only filesystem; directory already exists
 
 
 @dataclass(frozen=True)
