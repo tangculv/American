@@ -746,7 +746,9 @@ def execute_research_with_two_layer_output(
             }
         if not raw_payload.get('valuation'):
             raw_payload['valuation'] = {'valuation_view': 'neutral', 'target_price': None}
-        markdown_report = str(raw_payload.get('markdown_report') or getattr(result, 'raw_text', '') or '')
+        from .feishu_doc import build_markdown_report as _build_md
+        company_name_for_md = str(stock_context.get('company_name') or symbol)
+        markdown_report = _build_md(symbol, company_name_for_md, raw_payload)
         structured_fields = extract_structured_fields(raw_payload)
         quality_level, quality_issues = validate_research_quality(raw_payload)
         provider = 'perplexity'
