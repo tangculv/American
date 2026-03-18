@@ -54,6 +54,15 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _as_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _market_cap_bucket(market_cap: float | None) -> str:
     if market_cap is None:
         return "unknown"
@@ -556,6 +565,11 @@ STRUCTURED_FIELD_NAMES = [
     "invalidation_conditions_json",
     "three_sentence_summary",
     "refinancing_risk",
+    "bull_thesis_json",
+    "bear_thesis_json",
+    "catalysts_json",
+    "source_list_json",
+    "confidence_score",
 ]
 
 
@@ -586,8 +600,10 @@ def validate_research_quality(result: dict) -> tuple[str, list[str]]:
     if issues:
         return 'fail', issues
 
+    # QUALITY_FIELDS use lenient check: empty dict/list counts as present
+    # (Perplexity often returns {} for freeform objects like earnings_bridge)
     for field in QUALITY_FIELDS:
-        if _is_missing_quality_value(result.get(field)):
+        if result.get(field) is None:
             issues.append(field)
     if issues:
         return 'partial', issues
@@ -647,6 +663,11 @@ def extract_structured_fields(raw_result: dict) -> dict:
         'invalidation_conditions_json': _json_string_or_none(_extract_nested_value(payload, 'invalidation_conditions_json', 'invalidation_conditions')),
         'three_sentence_summary': _extract_nested_value(payload, 'three_sentence_summary'),
         'refinancing_risk': _extract_nested_value(payload, 'refinancing_risk'),
+        'bull_thesis_json': _json_string_or_none(_extract_nested_value(payload, 'bull_thesis_json', 'bull_thesis')),
+        'bear_thesis_json': _json_string_or_none(_extract_nested_value(payload, 'bear_thesis_json', 'bear_thesis')),
+        'catalysts_json': _json_string_or_none(_extract_nested_value(payload, 'catalysts_json', 'catalysts')),
+        'source_list_json': _json_string_or_none(_extract_nested_value(payload, 'source_list_json', 'source_list')),
+        'confidence_score': _as_int(_extract_nested_value(payload, 'confidence_score')),
     }
 
 
@@ -833,12 +854,34 @@ def save_two_layer_result(
             'research_snapshot_id', 'symbol', 'next_review_date', 'overall_recommendation',
             *STRUCTURED_FIELD_NAMES,
         ]
+        # Fields with NOT NULL DEFAULT constraints need fallback values
+        _NOT_NULL_JSON_DEFAULTS = {
+            'bull_thesis_json': '[]',
+            'bear_thesis_json': '[]',
+            'catalysts_json': '[]',
+            'source_list_json': '[]',
+            'top_risks_json': '[]',
+            'invalidation_conditions_json': '[]',
+        }
+        _NOT_NULL_INT_DEFAULTS = {
+            'confidence_score': 50,
+        }
+        def _field_value(field: str) -> Any:
+            val = result.structured_fields.get(field)
+            if val is not None:
+                return val
+            if field in _NOT_NULL_JSON_DEFAULTS:
+                return _NOT_NULL_JSON_DEFAULTS[field]
+            if field in _NOT_NULL_INT_DEFAULTS:
+                return _NOT_NULL_INT_DEFAULTS[field]
+            return val
+
         values = [
             int(cursor.lastrowid),
             symbol,
             now[:10],
             'hold',
-            *[result.structured_fields.get(field) for field in STRUCTURED_FIELD_NAMES],
+            *[_field_value(field) for field in STRUCTURED_FIELD_NAMES],
         ]
         placeholders = ', '.join('?' for _ in columns)
         connection.execute(
